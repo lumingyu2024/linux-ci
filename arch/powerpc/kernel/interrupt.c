@@ -312,7 +312,9 @@ notrace unsigned long interrupt_exit_user_prepare(struct pt_regs *regs)
 	BUG_ON(regs_is_unrecoverable(regs));
 	BUG_ON(arch_irq_disabled_regs(regs));
 	CT_WARN_ON(ct_state() == CT_STATE_USER);
+#ifdef CONFIG_PPC64
 	local_paca->irqentry_s = irqentry_enter(regs);
+#endif
 
 	/*
 	 * We don't need to restore AMR on the way back to userspace for KUAP.
@@ -425,7 +427,9 @@ again:
 	 * AMR value from the check above.
 	 */
 	kuap_kernel_restore(regs, kuap);
+#ifdef CONFIG_PPC64
 	irqentry_exit(regs, local_paca->irqentry_s);
+#endif
 
 	return ret;
 }

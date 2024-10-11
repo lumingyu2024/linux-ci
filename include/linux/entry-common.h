@@ -13,6 +13,7 @@
 #include <linux/tick.h>
 #include <linux/kmsan.h>
 
+#include <linux/irqentry-state.h>
 #include <asm/entry-common.h>
 
 /*
