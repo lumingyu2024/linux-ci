@@ -3,6 +3,7 @@
 #include <linux/context_tracking.h>
 #include <linux/err.h>
 #include <linux/compat.h>
+#include <linux/entry-common.h>
 #include <linux/rseq.h>
 #include <linux/sched/debug.h> /* for show_regs */
 
@@ -20,6 +21,7 @@
 #include <asm/time.h>
 #include <asm/tm.h>
 #include <asm/unistd.h>
+#include <asm/entry-common.h>
 
 #if defined(CONFIG_PPC_ADV_DEBUG_REGS) && defined(CONFIG_PPC32)
 unsigned long global_dbcr0[NR_CPUS];
@@ -183,47 +185,11 @@ interrupt_exit_user_prepare_main(unsigned long ret, struct pt_regs *regs)
 
 again:
 	ti_flags = read_thread_flags();
-	while (unlikely(ti_flags & (_TIF_USER_WORK_MASK & ~_TIF_RESTORE_TM))) {
-		local_irq_enable();
-		if (ti_flags & _TIF_NEED_RESCHED) {
-			schedule();
-		} else {
-			/*
-			 * SIGPENDING must restore signal handler function
-			 * argument GPRs, and some non-volatiles (e.g., r1).
-			 * Restore all for now. This could be made lighter.
-			 */
-			if (ti_flags & _TIF_SIGPENDING)
-				ret |= _TIF_RESTOREALL;
-			do_notify_resume(regs, ti_flags);
-		}
-		local_irq_disable();
-		ti_flags = read_thread_flags();
-	}
 
-	if (IS_ENABLED(CONFIG_PPC_BOOK3S_64) && IS_ENABLED(CONFIG_PPC_FPU)) {
-		if (IS_ENABLED(CONFIG_PPC_TRANSACTIONAL_MEM) &&
-				unlikely((ti_flags & _TIF_RESTORE_TM))) {
-			restore_tm_state(regs);
-		} else {
-			unsigned long mathflags = MSR_FP;
-
-			if (cpu_has_feature(CPU_FTR_VSX))
-				mathflags |= MSR_VEC | MSR_VSX;
-			else if (cpu_has_feature(CPU_FTR_ALTIVEC))
-				mathflags |= MSR_VEC;
-
-			/*
-			 * If userspace MSR has all available FP bits set,
-			 * then they are live and no need to restore. If not,
-			 * it means the regs were given up and restore_math
-			 * may decide to restore them (to avoid taking an FP
-			 * fault).
-			 */
-			if ((regs->msr & mathflags) != mathflags)
-				restore_math(regs);
-		}
-	}
+	if (ti_flags & _TIF_SIGPENDING)
+		ret |= _TIF_RESTOREALL;
+	if (unlikely(ti_flags & EXIT_TO_USER_MODE_WORK))
+		ti_flags = exit_to_user_mode_loop(regs, ti_flags);
 
 	check_return_regs_valid(regs);
 
@@ -245,6 +211,8 @@ again:
 
 	/* Restore user access locks last */
 	kuap_user_restore(regs);
+
+	arch_exit_to_user_mode_prepare(regs, ti_flags);
 
 	return ret;
 }
@@ -294,17 +262,16 @@ notrace unsigned long syscall_exit_prepare(unsigned long r3,
 		regs->gpr[3] = r3;
 	}
 
-	if (unlikely(ti_flags & _TIF_SYSCALL_DOTRACE)) {
-		do_syscall_trace_leave(regs);
-		ret |= _TIF_RESTOREALL;
-	}
-
 	local_irq_disable();
-	ret = interrupt_exit_user_prepare_main(ret, regs);
+	if (ti_flags & _TIF_RESTOREALL)
+		ret |= _TIF_RESTOREALL;
 
+	if (ti_flags & _TIF_SIGPENDING)
+		ret |= _TIF_RESTOREALL;
 #ifdef CONFIG_PPC64
 	regs->exit_result = ret;
 #endif
+	syscall_exit_to_user_mode(regs);
 
 	return ret;
 }
@@ -345,6 +312,7 @@ notrace unsigned long interrupt_exit_user_prepare(struct pt_regs *regs)
 	BUG_ON(regs_is_unrecoverable(regs));
 	BUG_ON(arch_irq_disabled_regs(regs));
 	CT_WARN_ON(ct_state() == CT_STATE_USER);
+	local_paca->irqentry_s = irqentry_enter(regs);
 
 	/*
 	 * We don't need to restore AMR on the way back to userspace for KUAP.
@@ -457,6 +425,7 @@ again:
 	 * AMR value from the check above.
 	 */
 	kuap_kernel_restore(regs, kuap);
+	irqentry_exit(regs, local_paca->irqentry_s);
 
 	return ret;
 }

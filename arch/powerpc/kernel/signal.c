@@ -11,6 +11,7 @@
 #include <linux/uprobes.h>
 #include <linux/key.h>
 #include <linux/context_tracking.h>
+#include <linux/entry-common.h>
 #include <linux/livepatch.h>
 #include <linux/syscalls.h>
 #include <asm/hw_breakpoint.h>
@@ -367,4 +368,10 @@ void signal_fault(struct task_struct *tsk, struct pt_regs *regs,
 	if (show_unhandled_signals)
 		printk_ratelimited(regs->msr & MSR_64BIT ? fm64 : fm32, tsk->comm,
 				   task_pid_nr(tsk), where, ptr, regs->nip, regs->link);
+}
+
+void arch_do_signal_or_restart(struct pt_regs *regs)
+{
+	BUG_ON(regs != current->thread.regs);
+	do_signal(current);
 }

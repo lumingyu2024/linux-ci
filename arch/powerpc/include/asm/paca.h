@@ -13,6 +13,7 @@
 #ifdef CONFIG_PPC64
 
 #include <linux/cache.h>
+#include <linux/irqentry-state.h>
 #include <linux/string.h>
 #include <asm/types.h>
 #include <asm/mmu.h>
@@ -278,6 +279,7 @@ struct paca_struct {
 	struct mce_info *mce_info;
 	u8 mce_pending_irq_work;
 #endif /* CONFIG_PPC_BOOK3S_64 */
+	irqentry_state_t irqentry_s;
 } ____cacheline_aligned;
 
 extern void copy_mm_to_paca(struct mm_struct *mm);
