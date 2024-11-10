@@ -18,6 +18,7 @@ notrace long system_call_exception(struct pt_regs *regs, unsigned long r0)
 {
 	long ret;
 	syscall_fn f;
+	unsigned long work = READ_ONCE(current_thread_info()->syscall_work);
 
 	kuap_lock();
 
@@ -119,7 +120,7 @@ notrace long system_call_exception(struct pt_regs *regs, unsigned long r0)
 
 	local_irq_enable();
 
-	if (unlikely(read_thread_flags() & _TIF_SYSCALL_DOTRACE)) {
+	if (work & SYSCALL_WORK_ENTER) {
 		if (unlikely(trap_is_unsupported_scv(regs))) {
 			/* Unsupported scv vector */
 			_exception(SIGILL, regs, ILL_ILLOPC, regs->nip);
@@ -132,7 +133,32 @@ notrace long system_call_exception(struct pt_regs *regs, unsigned long r0)
 		 * and the test against NR_syscalls will fail and the return
 		 * value to be used is in regs->gpr[3].
 		 */
+		if (test_syscall_work(SECCOMP) &&
+				!test_syscall_work(SYSCALL_EMU))
+			regs->gpr[3] = -ENOSYS;
 		r0 = syscall_enter_from_user_mode(regs, r0);
+
+		if (test_syscall_work(SECCOMP)) {
+			if (r0 != -1)
+				regs->gpr[3] = regs->orig_gpr3;
+			else
+				goto skip;
+		}
+		if ((r0 == -1) && (test_syscall_work(SYSCALL_TRACE))) {
+			goto skip1;
+		}
+		if ((r0 == -1) && test_syscall_work(SYSCALL_EMU))
+			goto skip;
+		if (regs->gpr[0] >= NR_syscalls)
+			goto skip1;
+
+		r0 = regs->gpr[0];
+		if (r0 != -1)
+			goto skip;
+skip1:
+		r0 = -1;
+		regs->gpr[3] = -ENOSYS;
+skip:
 		if (unlikely(r0 >= NR_syscalls))
 			return regs->gpr[3];
 

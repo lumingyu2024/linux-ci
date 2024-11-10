@@ -232,6 +232,7 @@ notrace unsigned long syscall_exit_prepare(unsigned long r3,
 {
 	unsigned long ti_flags;
 	unsigned long ret = 0;
+	unsigned long work = READ_ONCE(current_thread_info()->syscall_work);
 	bool is_not_scv = !IS_ENABLED(CONFIG_PPC_BOOK3S_64) || !scv;
 
 	CT_WARN_ON(ct_state() == CT_STATE_USER);
@@ -267,6 +268,9 @@ notrace unsigned long syscall_exit_prepare(unsigned long r3,
 		ret |= _TIF_RESTOREALL;
 
 	if (ti_flags & _TIF_SIGPENDING)
+		ret |= _TIF_RESTOREALL;
+
+	if (work)
 		ret |= _TIF_RESTOREALL;
 #ifdef CONFIG_PPC64
 	regs->exit_result = ret;
